@@ -10,9 +10,11 @@ from app.engines.rule_engine import decide_disposition, evaluate_row
 from app.repositories import batches as batch_repo
 from app.repositories import curated as curated_repo
 from app.repositories import datasets as dataset_repo
+from app.repositories import golden as golden_repo
 from app.repositories import quarantine as quarantine_repo
 from app.repositories import rules as rules_repo
 from app.seed import _now
+from app.services import golden_service
 
 
 def run_inspect(dataset_id: int) -> dict[str, Any]:
@@ -27,14 +29,13 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
         path = FIXTURES_DIR / ds["fixture_path"]
         rows = parse_jsonl(path)
         rules = [r for r in rules_repo.list_rules(conn, dataset_id) if r.get("enabled")]
+        gset = golden_repo.get_set(conn, dataset_id)
 
         scanned = len(rows)
         passed = failed = quarantined = released = 0
         row_results: list[dict[str, Any]] = []
         now = _now()
 
-        # pre-insert batch shell with zeros; update via rewrite after we know counts
-        # simpler: compute in memory then insert once
         for idx, payload in enumerate(rows, start=1):
             hits = evaluate_row(payload, rules)
             disposition = decide_disposition(hits)
@@ -63,7 +64,7 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
         ]
 
         # insert batch first to get id, then rows / quarantine / curated
-        report = {
+        report: dict[str, Any] = {
             "dataset_id": dataset_id,
             "dataset_name": ds["name"],
             "fixture_path": ds["fixture_path"],
@@ -76,6 +77,7 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
                 "released": 0,
             },
             "checks": checks,
+            "golden": {"registered": bool(gset)},
         }
         batch_id = batch_repo.insert_batch(
             conn,
@@ -89,6 +91,16 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
             report=report,
             created_at=now,
         )
+
+        pass_candidates: list[dict[str, Any]] = []
+        pass_keys = [
+            (item["entity_key"] or f"row-{item['row_no']}")
+            for item in row_results
+            if item["disposition"] != "quarantine"
+        ]
+        if gset and gset["enabled"]:
+            # 有金标：先记录将被覆盖的旧精选行，失败撤回时可精确还原。
+            curated_repo.snapshot_prior(conn, batch_id, dataset_id, pass_keys)
 
         for item in row_results:
             batch_repo.insert_row(
@@ -115,8 +127,9 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
                     created_at=now,
                 )
             else:
-                # pass rows auto-release to curated (base chain)
                 key = item["entity_key"] or f"row-{item['row_no']}"
+                pass_candidates.append({"entity_key": key, "payload": item["payload"]})
+                # 规则放行 → 写入精选区（签发动作）；金标差分失败时再整批撤回。
                 curated_repo.upsert(
                     conn,
                     dataset_id=dataset_id,
@@ -142,13 +155,43 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
                 "detail": "quarantine rows persisted for this and prior batches",
             }
         )
-        conn.execute(
-            """
-            UPDATE inspect_batches
-            SET released_count=?, report_json=?, status=?
-            WHERE id=?
-            """,
-            (released, json.dumps(report, ensure_ascii=False), "released" if released else "inspected", batch_id),
+
+        status = "released" if released else "inspected"
+        if gset and gset["enabled"]:
+            gate = golden_service.apply_gate(
+                conn,
+                batch_id=batch_id,
+                dataset_id=dataset_id,
+                candidates=pass_candidates,
+                report=report,
+                now=now,
+                gset=gset,
+            )
+            status = gate["status"]
+            released = gate["released"]
+            checks.append(
+                {
+                    "name": "golden_gate_required",
+                    "ok": True,
+                    "detail": (
+                        f"已登记金标 {gset['fixture_path']} → 差分 {gate['diff']['result']}；"
+                        f"发布状态 {status}"
+                    ),
+                }
+            )
+        else:
+            if gset and not gset["enabled"]:
+                report["golden"] = {"registered": True, "enabled": False}
+                checks.append(
+                    {
+                        "name": "golden_gate_skipped",
+                        "ok": True,
+                        "detail": "金标已停用，按规则入检签发",
+                    }
+                )
+
+        batch_repo.set_outcome(
+            conn, batch_id, status=status, released=released, report=report
         )
         conn.commit()
 
@@ -156,7 +199,9 @@ def run_inspect(dataset_id: int) -> dict[str, Any]:
         assert detail is not None
         detail["rows"] = batch_repo.list_batch_rows(conn, batch_id)
         detail["curated_total"] = curated_repo.count_all(conn, dataset_id)
+        detail["curated_batch_count"] = curated_repo.count_by_batch(conn, batch_id)
         detail["quarantine_total"] = quarantine_repo.count_all(conn)
+        detail["golden_diff"] = golden_repo.latest_for_batch(conn, batch_id)
         return detail
     finally:
         conn.close()
@@ -168,12 +213,18 @@ def dashboard_stats() -> dict[str, Any]:
         datasets = conn.execute("SELECT COUNT(*) AS c FROM datasets").fetchone()["c"]
         rules = conn.execute("SELECT COUNT(*) AS c FROM rules WHERE enabled=1").fetchone()["c"]
         batches = conn.execute("SELECT COUNT(*) AS c FROM inspect_batches").fetchone()["c"]
+        golden_sets = conn.execute("SELECT COUNT(*) AS c FROM golden_sets").fetchone()["c"]
+        failed_batches = conn.execute(
+            "SELECT COUNT(*) AS c FROM inspect_batches WHERE status='golden_failed'"
+        ).fetchone()["c"]
         return {
             "dataset_count": datasets,
             "enabled_rule_count": rules,
             "batch_count": batches,
             "curated_count": curated_repo.count_all(conn),
             "quarantine_count": quarantine_repo.count_all(conn),
+            "golden_set_count": golden_sets,
+            "golden_failed_batch_count": failed_batches,
         }
     finally:
         conn.close()

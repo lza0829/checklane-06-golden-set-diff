@@ -1,0 +1,4 @@
+{"entity_key":"SHP-1","shipment_id":"SH-1","order_id":"ORD-1","amount":12.5,"carrier":"SF"}
+{"entity_key":"SHP-2","shipment_id":"SH-2","order_id":"ORD-2","amount":9.0,"carrier":"JD"}
+{"entity_key":"SHP-3","shipment_id":"SH-3","order_id":"ORD-6","amount":20.0,"carrier":"SF"}
+{"entity_key":"SHP-4","shipment_id":"SH-4","order_id":"ORD-5","amount":4.5,"carrier":"ZTO"}

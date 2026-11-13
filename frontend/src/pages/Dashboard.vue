@@ -12,7 +12,7 @@ onMounted(async () => {
   <div class="page">
     <header>
       <h1>检道总览</h1>
-      <p class="muted">入检批次 → 规则裁决 → 隔离/放行签发 → 清单对账</p>
+      <p class="muted">入检批次 → 规则裁决 → 金标差分闸门 → 隔离/放行签发 → 清单对账</p>
     </header>
     <p v-if="err" class="tag danger">{{ err }}</p>
     <div class="tiles" v-if="stats">
@@ -21,6 +21,8 @@ onMounted(async () => {
       <div class="tile"><div class="hero-num">{{ stats.batch_count }}</div><div class="muted">入检批次</div></div>
       <div class="tile"><div class="hero-num">{{ stats.curated_count }}</div><div class="muted">精选行</div></div>
       <div class="tile"><div class="hero-num">{{ stats.quarantine_count }}</div><div class="muted">隔离行</div></div>
+      <div class="tile"><div class="hero-num">{{ stats.golden_set_count }}</div><div class="muted">金标数据集</div></div>
+      <div class="tile"><div class="hero-num">{{ stats.golden_failed_batch_count }}</div><div class="muted">差分失败批次</div></div>
     </div>
     <router-link class="btn" to="/inspect">去入检台</router-link>
   </div>

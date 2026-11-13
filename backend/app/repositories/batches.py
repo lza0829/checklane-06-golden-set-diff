@@ -99,6 +99,24 @@ def get_batch(conn: sqlite3.Connection, batch_id: int) -> dict[str, Any] | None:
     return d
 
 
+def set_outcome(
+    conn: sqlite3.Connection,
+    batch_id: int,
+    *,
+    status: str,
+    released: int,
+    report: dict[str, Any],
+) -> None:
+    conn.execute(
+        """
+        UPDATE inspect_batches
+        SET status=?, released_count=?, report_json=?
+        WHERE id=?
+        """,
+        (status, released, json.dumps(report, ensure_ascii=False), batch_id),
+    )
+
+
 def list_batch_rows(conn: sqlite3.Connection, batch_id: int) -> list[dict[str, Any]]:
     rows = conn.execute(
         """

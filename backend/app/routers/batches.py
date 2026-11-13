@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException
 
 from app.db import connect
 from app.repositories import batches as batch_repo
+from app.repositories import curated as curated_repo
+from app.repositories import golden as golden_repo
 
 router = APIRouter(tags=["batches"])
 
@@ -23,6 +25,8 @@ def get_batch(batch_id: int):
         if not detail:
             raise HTTPException(404, "batch not found")
         detail["rows"] = batch_repo.list_batch_rows(conn, batch_id)
+        detail["curated_batch_count"] = curated_repo.count_by_batch(conn, batch_id)
+        detail["golden_diff"] = golden_repo.latest_for_batch(conn, batch_id)
         return detail
     finally:
         conn.close()

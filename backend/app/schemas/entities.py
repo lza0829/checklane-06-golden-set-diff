@@ -7,3 +7,7 @@ class InspectRequest(BaseModel):
 
 class RuleEnablePatch(BaseModel):
     enabled: bool
+
+
+class GoldenRegisterRequest(BaseModel):
+    fixture_path: str

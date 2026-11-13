@@ -6,6 +6,7 @@ import Inspect from './pages/Inspect.vue'
 import Batches from './pages/Batches.vue'
 import Quarantine from './pages/Quarantine.vue'
 import Curated from './pages/Curated.vue'
+import Golden from './pages/Golden.vue'
 
 export default createRouter({
   history: createWebHistory(),
@@ -17,5 +18,6 @@ export default createRouter({
     { path: '/batches', component: Batches },
     { path: '/quarantine', component: Quarantine },
     { path: '/curated', component: Curated },
+    { path: '/golden', component: Golden },
   ],
 })
